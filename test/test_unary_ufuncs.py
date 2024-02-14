@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    is_iterable_of_tensors,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -318,9 +319,13 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, non_contig)
-        self.assertEqual(
-            op(contig, **torch_kwargs)[::2], op(non_contig, **torch_kwargs)
-        )
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        if is_iterable_of_tensors(expected):
+            for a, b in zip(result, expected):
+                self.assertEqual(a[::2], b)
+        else:
+            self.assertEqual(result[::2], expected)
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -333,7 +338,13 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs).T, op(non_contig, **torch_kwargs))
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        if is_iterable_of_tensors(expected):
+            for a, b in zip(result, expected):
+                self.assertEqual(a.T, b)
+        else:
+            self.assertEqual(result.T, expected)
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
@@ -385,9 +396,15 @@ class TestUnaryUfuncs(TestCase):
             contig = op(contig, **torch_kwargs)
             non_contig = op(non_contig, **torch_kwargs)
             for i in range(3):
-                self.assertEqual(
-                    contig, non_contig[i], msg="non-contiguous expand[" + str(i) + "]"
-                )
+                if is_iterable_of_tensors(contig):
+                    for a, b in zip(contig, non_contig):
+                        self.assertEqual(
+                            a, b[i], msg="non-contiguous expand[" + str(i) + "]"
+                        )
+                else:
+                    self.assertEqual(
+                        contig, non_contig[i], msg="non-contiguous expand[" + str(i) + "]"
+                    )
 
     @ops(unary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
@@ -433,7 +450,13 @@ class TestUnaryUfuncs(TestCase):
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
         actual = op(input, **torch_kwargs)
-        expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+
+        expected_unstacked = [op(slice, **torch_kwargs) for slice in input]
+        if is_iterable_of_tensors(actual):
+            all_outs = [op(slice, **torch_kwargs) for slice in input]
+            expected = [torch.stack([out[i] for out in all_outs]) for i in range(len(actual))]
+        else:
+            expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
 
         self.assertEqual(actual, expected)
 
