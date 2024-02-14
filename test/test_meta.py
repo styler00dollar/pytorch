@@ -854,6 +854,7 @@ meta_dispatch_device_expected_failures['cpu'] = {
     aten.native_batch_norm.default: {bf16, f16},
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
+    aten.batch_norm_with_update.default: {bf16, f16},
     aten.native_layer_norm.default: {bf16, f16},
     aten.histc.default: {f16},
     aten.histc.out: {f16},
@@ -881,6 +882,7 @@ meta_dispatch_device_skips['cpu'] = {
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
+    aten.batch_norm_with_update.default: {f32, f64},
 
     # If the computation dtype is different from the input
     # dtype this will fail. CPU execution may also have a
