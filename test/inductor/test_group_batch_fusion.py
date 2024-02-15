@@ -6,8 +6,7 @@ import unittest
 import torch
 import torch._inductor
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch._dynamo.utils import counters, optimus_scuba_log
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -18,11 +17,8 @@ except Exception:
     has_fbgemm = False
     pass
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-
-
 class MyModule(torch.nn.Module):
-    def __init__(self, z: int, has_bias: bool, device="cuda") -> None:
+    def __init__(self, z: int, has_bias: bool, device="cpu") -> None:
         super().__init__()
         self.z = z
         self.device = device
@@ -220,7 +216,6 @@ class TestPoitwiseOps(torch.nn.Module):
         return torch.cat(div, dim=1)
 
 
-@requires_cuda
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
         "batch_linear": {},
@@ -271,8 +266,8 @@ class TestGroupBatchFusion(TestCase):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule(z, has_bias).to("cuda")
-            input = [torch.randn(z, z, device="cuda")]
+            module = MyModule(z, has_bias).to("cpu")
+            input = [torch.randn(z, z, device="cpu")]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -285,6 +280,7 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_fusion"],
                 0,
             )
+            self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
@@ -297,13 +293,14 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_fusion"],
                 3,
             )
+            self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     def test_group_linear_fusion_different_shapes(self):
         counters.clear()
-        module = MyModule2().eval().to("cuda")
-        input = [torch.rand(4, 24, device="cuda")]
+        module = MyModule2().eval().to("cpu")
+        input = [torch.rand(4, 24, device="cpu")]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -334,8 +331,8 @@ class TestGroupBatchFusion(TestCase):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
                 counters.clear()
-                module = MyModule3("cuda", has_weight, has_bias).to("cuda")
-                input = [torch.randn(2, 5, 50, device="cuda")]
+                module = MyModule3("cpu", has_weight, has_bias).to("cpu")
+                input = [torch.randn(2, 5, 50, device="cpu")]
                 traced = torch.compile(module)
                 ref = module(*input)
                 res = traced(*input)
@@ -363,8 +360,8 @@ class TestGroupBatchFusion(TestCase):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule4(z, "cuda", has_bias)
-            input = [torch.randn(20, z, device="cuda")]
+            module = MyModule4(z, "cpu", has_bias)
+            input = [torch.randn(20, z, device="cpu")]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -387,8 +384,8 @@ class TestGroupBatchFusion(TestCase):
     def test_batch_linear_pre_grad_fusion(self):
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule5("cuda", has_bias)
-            input = [torch.randn(50, 500, device="cuda")]
+            module = MyModule5("cpu", has_bias)
+            input = [torch.randn(50, 500, device="cpu")]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -411,8 +408,8 @@ class TestGroupBatchFusion(TestCase):
 
     def test_pointwise_op_fusion(self):
         counters.clear()
-        module = TestPoitwiseOps("cuda")
-        input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
+        module = TestPoitwiseOps("cpu")
+        input = [torch.randn(50, 1000, requires_grad=True, device="cpu")]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -450,16 +447,15 @@ class TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@requires_cuda
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
     def test_batch_linear_post_grad_fusion(self):
-        pt1_module = TestBMMFusionModule().cuda()
+        pt1_module = TestBMMFusionModule()
         inputs = []
         for _ in range(10):
-            inputs.append(torch.randn(10, 10).cuda())
+            inputs.append(torch.randn(10, 10))
         eager_output = pt1_module(inputs)
         pt2_module = torch.compile(pt1_module)
         pt2_output = pt2_module(inputs)
@@ -468,6 +464,8 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_fusion"],
             2,
         )
+        self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
+        self.assertIn("group_batch_fusion_post_grad", optimus_scuba_log)
 
 
 class TestFindIndependentSubsetGreedy(TestCase):

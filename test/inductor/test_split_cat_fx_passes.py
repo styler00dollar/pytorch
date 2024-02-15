@@ -2,7 +2,7 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -90,6 +90,10 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["split_cat_norm"],
                 expected_split_norm_count,
             )
+            if expected_split_norm_count > 0:
+                self.assertIn(
+                    "split_cat_pattern_normalization_pass_pre_grad", optimus_scuba_log
+                )
             counters.clear()
 
     @patch
@@ -251,6 +255,10 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["consecutive_split_merged"],
                 expected_split_merged,
             )
+            if expected_split_merged > 0:
+                self.assertIn(
+                    "split_cat_pattern_merge_splits_pass_pre_grad", optimus_scuba_log
+                )
             counters.clear()
 
     @patch
@@ -1063,6 +1071,7 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["stack_tahn_unbind_merged"],
                 expected_stack_tahn_unbind_merged,
             )
+            self.assertIn("split_cat_pattern_merge_getitem_cat_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     def test_numpy_compat_normalization(self):
@@ -1087,7 +1096,7 @@ class TestSplitCatFxPasses(TestCase):
         def fn(x, y):
             return torch.stack([x, y], axis=1)
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device="cpu") for _ in range(2))
         expected = fn(x, y)
         actual = torch.compile(fn)(x, y)
 
